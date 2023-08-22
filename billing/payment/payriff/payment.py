@@ -9,3 +9,16 @@ class Order:
     session_id: str
     payment_url: str
     transaction_id: str
+
+@dataclass
+class OrderStatus:
+    code: str
+    message: str
+    orderId: str
+    orderStatus: str
+
+@dataclass
+class Refund:
+    code: str
+    internalMessage: str
+    message: str

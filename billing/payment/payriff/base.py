@@ -1,5 +1,5 @@
 from django.conf import settings
-from .payment import Order
+from .payment import Order, OrderStatus, Refund
 import requests, json
 
 class PayriffGateway:
@@ -15,8 +15,10 @@ class PayriffGateway:
         self.approve_url = approve_url
         self.cancel_url = cancel_url
         self.decline_url = decline_url
-        self.__order_instance = None
 
+        self.__order_instance = None
+        self.__payment_status = None
+        self.__order_refund = None
 
     def __post(self, method_name: str, payload: dict) -> dict:
         url = f"{self.BASE_URL}{method_name}"
@@ -36,7 +38,7 @@ class PayriffGateway:
     def __build_json_payload(self, data: dict) -> dict:
         return json.dumps(data)
     
-    def __build_order_object(self, order_data: dict , result: dict):
+    def __build_order_object(self, order_data: dict , result: dict) -> None:
         self.__order_instance = Order(
             amount=order_data["body"]["amount"],
             currency=order_data["body"]["currencyType"],
@@ -47,16 +49,38 @@ class PayriffGateway:
             transaction_id=result["payload"]["transactionId"]
         )
 
+    def __build_order_status_object(self, result: dict) -> None:
+        self.__payment_status = OrderStatus(
+                code = result["code"],
+                message = result["message"], 
+                orderId = result["payload"]["orderId"],
+                orderStatus = result["payload"]["orderStatus"]
+        )
+
+    def __build_order_refund(self, result: dict) -> None:
+        self.__order_refund = Refund(
+            status_code=result["code"],
+            internal_message=result["internalMessage"],
+            message=result["message"],
+        )
+
+    def get_order_refund(self):
+        return self.__order_refund
+
+    def get_payment_status(self):
+        return self.__payment_status
+    
     def get_order(self):
         return self.__order_instance
     
     def create_order(
-        self,
-        amount: float,
-        currency: str,
-        direct_pay: bool = True,
-        description: str = None,
-        language: str = "AZ") -> dict:
+            self,
+            amount: float,
+            currency: str,
+            direct_pay: bool = True,
+            description: str = None,
+            language: str = "AZ") -> dict:
+        
         order_data = {
             "body": {
                 "amount": amount,
@@ -84,4 +108,59 @@ class PayriffGateway:
             "payment_url": order.payment_url, 
             "session_id": order.session_id, 
             "order_id": order.order_id
+        }
+    
+    def get_payment_status(
+            self,
+            order_id: str = None,
+            language: str = "AZ",
+            session_id: str = None
+        ) -> dict:
+        order_data=  {
+            "body": {
+              "language": language,
+              "orderId": order_id,
+              "sessionId": session_id
+            },
+            "merchant": self.merchant_id
+        }
+        json_payload = self.__build_json_payload(data=order_data)
+        result = self.__post(
+            method_name="getStatusOrder",
+            payload=json_payload
+        )
+        self.__build_order_status_object(result=result)
+        order_status = self.get_payment_status()
+        return {
+            "code": order_status.code,
+            "order_id": order_status.orderId,
+            "status": order_status.orderStatus,
+            "message": order_status.message,
+        }
+    
+    def refund_order(
+        self,
+        amount: float,
+        order_id: str = None,
+        session_id: str = None) -> dict:
+        order_data = {
+            "body": {
+                "refundAmount": amount,
+                "orderId": order_id,
+                "sessionId": session_id,
+            },
+            "merchant": self.merchant_id,
+        }
+        json_payload = self.__build_json_payload(data=order_data)
+        result = self.__post(
+            method_name="refund",
+            payload=json_payload,
+        )
+        self.__build_order_refund(result=result)
+        refund_order = self.__refund_order_instance
+
+        return {
+            "status_code": refund_order.status_code,
+            "internal_message": refund_order.internal_message,
+            "message": refund_order.message,
         }
